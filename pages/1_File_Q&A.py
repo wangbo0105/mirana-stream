@@ -1,5 +1,24 @@
+import os
+
 import streamlit as st
-import anthropic
+from langchain_chroma import Chroma
+from langchain_community.embeddings import DashScopeEmbeddings
+from langchain_core.document_loaders import BaseLoader
+from langchain_core.documents import Document
+from langchain_text_splitters import TokenTextSplitter
+from llama_index.core import TreeIndex
+from llama_index.core.readers import StringIterableReader
+
+os.environ.setdefault("DASHSCOPE_API_KEY", "sk-cc2df096be3c4382b3da9a63e5b3b267")
+
+class StringLoader(BaseLoader):
+    """自定义 Loader 从字符串加载文档。"""
+
+    def __init__(self, string_content: str):
+        self.string_content = string_content
+
+    def load(self):
+        yield Document(page_content=self.string_content)
 
 with st.sidebar:
     anthropic_api_key = st.text_input("Anthropic API Key", key="file_qa_api_key", type="password")
@@ -14,20 +33,15 @@ question = st.text_input(
     disabled=not uploaded_file,
 )
 
-if uploaded_file and question and not anthropic_api_key:
-    st.info("Please add your Anthropic API key to continue.")
-
-if uploaded_file and question and anthropic_api_key:
+if uploaded_file and question:
     article = uploaded_file.read().decode()
-    prompt = f"""{anthropic.HUMAN_PROMPT} Here's an article:\n\n<article>
-    {article}\n\n</article>\n\n{question}{anthropic.AI_PROMPT}"""
 
-    client = anthropic.Client(api_key=anthropic_api_key)
-    response = client.completions.create(
-        prompt=prompt,
-        stop_sequences=[anthropic.HUMAN_PROMPT],
-        model="claude-v1",  # "claude-2" for Claude 2 model
-        max_tokens_to_sample=100,
-    )
-    st.write("### Answer")
-    st.write(response.completion)
+    doc = StringLoader(article).load()
+    text_splitter = TokenTextSplitter(chunk_size=1000, chunk_overlap=0)
+    documents = text_splitter.split_documents(doc)
+
+    db = Chroma.from_documents(documents, DashScopeEmbeddings())
+
+    docs = db.similarity_search(question)
+
+    st.write(docs[0].page_content)
